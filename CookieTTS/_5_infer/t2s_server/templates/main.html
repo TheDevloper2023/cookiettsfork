@@ -85,6 +85,7 @@
                                 <option value="cycle_next" {{ 'selected' if multispeaker_mode == 'cycle_next' else '' }}>Cycle Next (go down the list, use the next speaker for each text then loop back to the top)</option>
                                 <option value="interleaved" {{ 'selected' if multispeaker_mode == 'interleaved' else '' }}>Interleaved (seperate speaker for each text segment, going from top to bottom)</option>
                                 <option value="not_interleaved" {{ 'selected' if multispeaker_mode == 'not_interleaved' else '' }}>Non-Interleaved (speaker going from top to bottom per clip attempt)</option>
+                                <option value="not_interleaved" {{ 'selected' if multispeaker_mode == 'single' else '' }}>Single (use the same speaker you've selected for every text segment)</option>
                             </select></div>
                         <div class="form-group">
                             <label for="select">Silence between clips (Seconds)</label>
@@ -142,6 +143,15 @@
                                 <option disabled value="token" {{ 'selected' if style_mode == 'token' else '' }}>Manual Style Tokens</option>
                                 <option disabled value="zeros" {{ 'selected' if style_mode == 'zeros' else '' }}>Neutral/None</option>
                             </select></div>
+                        <h6>Denoiseing</h6>
+                        <div class="form-group">
+                            <label for="input">Denoise1</label>
+                            <input type="number" name="denoise1" value="{{denoise1}}" step="any">
+                        </div>
+                        <div class="form-group">
+                            <label for="input">Super resolution strength</label>
+                            <input type="number" name="srpower" value="{{srpower}}" step="any">
+                        </div>     
                     </div>
                 <div class="form-group">
                     <label for="select">Speaker(s)</label>
