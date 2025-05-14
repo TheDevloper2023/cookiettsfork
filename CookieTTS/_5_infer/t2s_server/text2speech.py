@@ -14,12 +14,17 @@ from glob import glob
 from unidecode import unidecode
 import nltk # sentence spliting
 from nltk import sent_tokenize
-
-from CookieTTS._2_ttm.tacotron2_tm.model import Tacotron2, load_model
-from CookieTTS._4_mtw.waveglow.denoiser import Denoiser
+from CookieTTS._2_ttm.tacotron2_tm.model import load_model
 from CookieTTS.utils.text import text_to_sequence
 from CookieTTS.utils.dataset.utils import load_filepaths_and_text
 from CookieTTS.utils.model.utils import alignment_metric
+############################################################################
+from CookieTTS._4_mtw.hifi.denoiser import Denoiser
+from CookieTTS._4_mtw.hifi.env import AttrDict 
+from CookieTTS._4_mtw.hifi.models import Generator 
+from CookieTTS._4_mtw.hifi.meldataset import MAX_WAV_VALUE
+import scipy.signal
+############################################################################
 
 def get_mask_from_lengths(lengths, max_len=None):
     if not max_len:
@@ -164,8 +169,8 @@ def get_first_over_thresh(x, threshold):
 class T2S:
     def __init__(self, conf):
         self.conf = conf
+        self.hconf = None
         torch.set_grad_enabled(False)
-        
         # load Tacotron2
         self.ttm_current = self.conf['TTM']['default_model']
         assert self.ttm_current in self.conf['TTM']['models'].keys(), "Tacotron default model not found in config models"
@@ -259,7 +264,7 @@ class T2S:
         print("Loading HiFi-GAN...")
         from CookieTTS._4_mtw.hifigan.models import load_model as load_hifigan_model
         vocoder, vocoder_config = load_hifigan_model(vocoder_path)
-        vocoder.half()
+        self.hconf = os.path.join(os.path.dirname(vocoder_path), 'config.json')
         print("Done!")
         
         print("Clearing CUDA Cache... ", end='')
@@ -276,7 +281,9 @@ class T2S:
                 pass
         print('\n'*10)
         
+       
         return vocoder, vocoder_config
+        
     
     
     def update_tacotron2_hparams(self, hparams):
@@ -304,6 +311,9 @@ class T2S:
         model = load_model(checkpoint_hparams) # initialize the model
         model.load_state_dict(checkpoint_dict) # load pretrained weights
         _ = model.cuda().eval()#.half()
+        
+        
+        
         print("Done")
         
         #print("Compiling Tacotron Decoder... ", end='')
@@ -331,7 +341,7 @@ class T2S:
     
     
     @torch.no_grad()
-    def infer(self, text, speaker_names, style_mode, textseg_mode, batch_mode, max_attempts, max_duration_s, batch_size, dyna_max_duration_s, use_arpabet, target_score, speaker_mode, cat_silence_s, textseg_len_target, gate_delay=2, gate_threshold=0.7, filename_prefix=None, status_updates=True, show_time_to_gen=True, end_mode='thresh', absolute_maximum_tries=2048, absolutely_required_score=-1e3):
+    def infer(self, text, speaker_names, style_mode, textseg_mode, batch_mode, max_attempts, max_duration_s, batch_size, dyna_max_duration_s, use_arpabet, target_score, speaker_mode, cat_silence_s, textseg_len_target, denoise1=0.39, srpower=4.0 ,gate_delay=4, gate_threshold=0.5, filename_prefix=None, status_updates=True, show_time_to_gen=True, end_mode='max', absolute_maximum_tries=2048, absolutely_required_score=-1e3):
         """
         PARAMS:
         ...
@@ -375,10 +385,10 @@ class T2S:
         scores = []
         
         # Score Parameters
-        diagonality_weighting = 0.5 # 'pacing factor', a penalty for clips where the model pace changes often/rapidly. # this thing does NOT work well for Rarity.
-        max_focus_weighting = 1.0   # 'stuck factor', a penalty for clips that spend execisve time on the same letter.
-        min_focus_weighting = 0.5   # 'miniskip factor', a penalty for skipping/ignoring single letters in the input text.
-        avg_focus_weighting = 1.0   # 'skip factor', a penalty for skipping very large parts of the input text
+        diagonality_weighting = 0.8 # 'pacing factor', a penalty for clips where the model pace changes often/rapidly. # this thing does NOT work well for Rarity.
+        max_focus_weighting = 0.7   # 'stuck factor', a penalty for clips that spend execisve time on the same letter.
+        min_focus_weighting = .6   # 'miniskip factor', a penalty for skipping/ignoring single letters in the input text.
+        avg_focus_weighting = .5   # 'skip factor', a penalty for skipping very large parts of the input text
         
         # add a filename prefix to keep multiple requests seperate
         if not filename_prefix:
@@ -470,6 +480,8 @@ class T2S:
                     speaker_names.append(speaker_names.pop(0))
                     return first_speaker
                 batch_speaker_names = [shuffle_and_return() for i in range(simultaneous_texts)]
+            elif speaker_mode == "single":
+                batch_speaker_names = [speaker_names[0]] * simultaneous_texts  # Use only the first 
             else:
                 raise NotImplementedError
             
@@ -650,7 +662,14 @@ class T2S:
             max_length = output_lengths.max()
             mel_batch_outputs_postnet = torch.nn.utils.rnn.pad_sequence(mel_batch_outputs_postnet, batch_first=True, padding_value=-11.52).transpose(1,2)[:,:,:max_length]
             #alignments_batch = torch.nn.utils.rnn.pad_sequence(alignments_batch, batch_first=True, padding_value=0)[:,:max_length,:]
-            
+            '''
+            mel_batch_outputs_postnet  = mel_batch_outputs_postnet.float()  # Ensure correct dtype
+            mel_80 = mel_batch_outputs_postnet
+            mel_80_transposed = mel_80.transpose(1, 2)  # [batch, time, 80]
+            mel_160_transposed = torch.nn.functional.interpolate(mel_80_transposed, size=160, mode='linear', align_corners=True)
+            mel_160 = mel_160_transposed.transpose(1, 2)  # [batch, 160, time]
+            mel_batch_outputs_postnet = mel_160
+            '''
             if status_updates:
                 vo_start = time.time()
                 print("Running Vocoder... ")
@@ -679,8 +698,8 @@ class T2S:
                 
                 # remove Tacotron2 padding
                 spec_end = output_lengths[j]
-                #mel_outputs_postnet = mel_batch_outputs_postnet.split(1, dim=0)[j][:,:,:spec_end]
-                #alignments = alignments_batch.split(1, dim=0)[j][:,:spec_end,:text_lengths[j]]
+                mel_outputs_postnet = mel_batch_outputs_postnet.split(1, dim=0)[j][:,:,:spec_end]
+                alignments = alignments_batch.split(1, dim=0)[j][:,:spec_end,:text_lengths[j]]
                 
                 # save audio
                 filename = f"{filename_prefix}_{counter//300:04}_{counter:06}.wav"
@@ -691,14 +710,64 @@ class T2S:
                     cat_silence_samples = int(cat_silence_s*self.ttm_hparams.sampling_rate)
                     audio = torch.nn.functional.pad(audio, (0, cat_silence_samples))
                 
-                # scale audio for int16 output
-                audio = (audio.float() * 2**15).squeeze().numpy().astype('int16')
+
+                # Hifi-Gan Denoiser
+                with open(self.hconf) as f:
+                    json_config = json.loads(f.read())
+                h = AttrDict(json_config)
+                hifigan_a = Generator(h).to(torch.device("cuda"))
+                denoiser = Denoiser(hifigan_a, mode="normal")
+                fs = h.sampling_rate  # Sampling rate from config
+
+                # Denoise audio
+                audio = audio * MAX_WAV_VALUE
+                audio_denoised = denoiser(audio.view(1, -1), strength=denoise1)[:, 0]  # Reduced strength
+                audio_np = audio_denoised.cpu().numpy().astype(np.float64)
+                if np.any(np.isnan(audio_np)) or np.any(np.isinf(audio_np)):
+                    raise ValueError("NaN or Inf detected in audio_np after denoising")
+
+                # Normalize
+                max_amplitude = np.max(np.abs(audio_np))
+                
+                normalize = (MAX_WAV_VALUE / max_amplitude) ** 0.8
+                audio_np = audio_np * normalize
+
+                # Optional high-pass filter (use lower cutoff for speech)
+                # Comment out to test without filtering
+                b = scipy.signal.firwin(numtaps=101, cutoff=60, fs=fs, pass_zero=False)
+                audio_filtered = scipy.signal.lfilter(b, [1.0], audio_np)
+                mix_factor = 0.2  # Blend filtered and unfiltered audio
+                audio_mixed = (1 - mix_factor) * audio_np + mix_factor * audio_filtered
+                # audio_mixed = audio_np  # Uncomment to skip filter entirely
+
+                # Moderate amplification
+                audio_mixed *= srpower  # Adjust as needed (1.0 for no extra gain)
+                audio_mixed /= normalize  # Denormalize
+
+                # Clip to prevent overflow
+                audio_mixed = np.clip(audio_mixed, -MAX_WAV_VALUE, MAX_WAV_VALUE)
+
+                # Scale to int16
+                audio = (audio_mixed * 32767 / MAX_WAV_VALUE).astype(np.int16)
+            
+                # Save audio
+                filename = f"{filename_prefix}_{counter//300:04}_{counter:06}.wav"
+                save_path = os.path.join(self.conf['working_directory'], filename)
+                if os.path.exists(save_path):
+                    print(f"File already found at [{save_path}], overwriting.")
+                    os.remove(save_path)
+                audio = audio.flatten()
+                
+                write(save_path, fs, audio)
+                                #DODO1
                 
                 # remove if already exists
                 if os.path.exists(save_path):
                     print(f"File already found at [{save_path}], overwriting.")
                     os.remove(save_path)
                 
+                audio = audio.flatten()
+                # Write the audio file
                 write(save_path, self.ttm_hparams.sampling_rate, audio)
                 
                 counter+=1

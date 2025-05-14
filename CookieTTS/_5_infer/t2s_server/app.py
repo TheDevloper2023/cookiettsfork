@@ -49,6 +49,8 @@ def texttospeech():
         textseg_len_target = int(result.get('input_textseg_len_target'))
         MTW_current = result.get('input_MTW_current') # current mel-to-wave
         ttm_current = result.get('input_ttm_current') # current text-to-mel
+        denoise1 = result.get('denoise1') 
+        srpower = result.get('srpower')
         print(result)
         
         # update Text-to-mel model if needed
@@ -75,7 +77,7 @@ def texttospeech():
         pass
         
         # generate an audio file from the inputs
-        filename, gen_time, gen_dur, total_specs, n_passes, avg_score = t2s.infer(text, speaker, style_mode, textseg_mode, batch_mode, max_attempts, max_duration_s, batch_size, dyna_max_duration_s, use_arpabet, target_score, multispeaker_mode, cat_silence_s, textseg_len_target)
+        filename, gen_time, gen_dur, total_specs, n_passes, avg_score = t2s.infer(text, speaker, style_mode, textseg_mode, batch_mode, max_attempts, max_duration_s, batch_size, dyna_max_duration_s, use_arpabet, target_score, multispeaker_mode, cat_silence_s, textseg_len_target, float(denoise1), float(srpower))
         print(f"GENERATED {filename}\n\n")
         
         # send updated webpage back to client along with page to the file
@@ -111,7 +113,9 @@ def texttospeech():
                                 avg_score=round(avg_score,3),
                                 multispeaker_mode=multispeaker_mode,
                                 cat_silence_s=cat_silence_s,
-                                textseg_len_target=textseg_len_target,)
+                                textseg_len_target=textseg_len_target,
+                                denoise1=float(denoise1),
+                                srpower=float(srpower),)
 
 #Route to render GUI
 @app.route('/')
@@ -148,7 +152,9 @@ def show_entries():
                             avg_score="",
                             multispeaker_mode=conf['webpage']['defaults']['multispeaker_mode'],
                             cat_silence_s=conf['webpage']['defaults']['cat_silence_s'],
-                            textseg_len_target=conf['webpage']['defaults']['textseg_len_target'],)
+                            textseg_len_target=conf['webpage']['defaults']['textseg_len_target'],
+                            denoise1=conf['webpage']['defaults']['denoise1'],
+                            srpower=conf['webpage']['defaults']['srpower'],)
 
 #Route to stream audio
 @app.route('/<voice>', methods=['GET'])
