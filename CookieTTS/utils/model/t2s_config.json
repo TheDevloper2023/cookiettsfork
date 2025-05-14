@@ -1,0 +1,59 @@
+{
+    "terminal": {
+        "show_inference_progress": true,
+        "show_inference_alignment_scores": true
+    },
+    "webpage": {
+        "max_input_len": "99999999",
+        "sort_speakers": true,
+        "localhost": false,
+        "defaults": {
+            "current_text"   : "",
+            "background_text": "Enter text.",
+            "speaker"       : ["(Audiobook) Blizzard2011_Nancy"],
+            "style_mode"     : "torchmoji_hidden",
+            "textseg_mode"   : "segment_by_sentencequote",
+            "batch_mode"     : "nochange",
+            "max_attempts"   : 64,
+            "max_duration_s" : 12.0,
+            "batch_size"     : 64,
+            "use_arpabet"    : "on",
+            "target_score"   : 0.8,
+            "cat_silence_s"  : 0.20,
+            "multispeaker_mode": "non-interleaved",
+            "textseg_len_target": 100,
+            "dyna_max_duration_s": 0.1,
+            "srpower": 4.0,
+            "denoise1": 0.45
+            
+            
+        }
+    },
+    "workers": {
+        "devices": ["cpu", "cuda:0"],
+        "sox_output_ext": "wav",
+        "working_directory": "Audiobooks/tmp",
+        "output_directory": "Audiobooks",
+        "output_maxsize_gb": 0.01,
+        "dict_path": "C:/Users/L/Desktop/PPP/cookietts/CookieTTS/dict/merged.dict.txt",
+        "TTM": {
+            "speaker_ids_file": "C:/Users/L/Desktop/PPP/cookietts/CookieTTS/dict/speaker_ids.txt",
+            "use_speaker_ids_file_override": true,
+            "default_model": "MEL | Tacotron2 TM P3 0.5DFR 0.0DO (best_inf_attsc)",
+            "models": {
+                "MEL | Tacotron2 TM P3 0.5DFR 0.0DO (best_inf_attsc)": {
+                    "modelpath": "codedump/tacotron2/best_inf_attsc"
+                }
+            }
+        },
+        "MTW": {
+            "default_model": "MEL | HiFi-GAN V1 44Khz",
+            "models": {
+                "MEL | HiFi-GAN V1 44Khz": {
+                    "modelpath": "codedump/hifigan/vocoder"
+                }
+            }
+        }
+        
+    }
+}
