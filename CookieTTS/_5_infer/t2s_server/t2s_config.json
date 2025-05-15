@@ -24,7 +24,8 @@
             "textseg_len_target": 100,
             "dyna_max_duration_s": 0.1,
             "srpower": 4.0,
-            "denoise1": 0.45
+            "denoise1": 45,
+            "skipfilter": true
             
             
         }
@@ -52,6 +53,8 @@
                 "MEL | HiFi-GAN V1 44Khz": {
                     "modelpath": "codedump/hifigan/vocoder"
                 }
+
+               
             }
         }
         

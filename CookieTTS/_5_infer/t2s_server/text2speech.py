@@ -18,7 +18,7 @@ from CookieTTS._2_ttm.tacotron2_tm.model import load_model
 from CookieTTS.utils.text import text_to_sequence
 from CookieTTS.utils.dataset.utils import load_filepaths_and_text
 from CookieTTS.utils.model.utils import alignment_metric
-############################################################################
+############/Denoiser/######################################################
 from CookieTTS._4_mtw.hifi.denoiser import Denoiser
 from CookieTTS._4_mtw.hifi.env import AttrDict 
 from CookieTTS._4_mtw.hifi.models import Generator 
@@ -341,7 +341,7 @@ class T2S:
     
     
     @torch.no_grad()
-    def infer(self, text, speaker_names, style_mode, textseg_mode, batch_mode, max_attempts, max_duration_s, batch_size, dyna_max_duration_s, use_arpabet, target_score, speaker_mode, cat_silence_s, textseg_len_target, denoise1=0.39, srpower=4.0 ,gate_delay=4, gate_threshold=0.5, filename_prefix=None, status_updates=True, show_time_to_gen=True, end_mode='max', absolute_maximum_tries=2048, absolutely_required_score=-1e3):
+    def infer(self, text, speaker_names, style_mode, textseg_mode, batch_mode, max_attempts, max_duration_s, batch_size, dyna_max_duration_s, use_arpabet, target_score, speaker_mode, cat_silence_s, textseg_len_target, denoise1, srpower, skipfilter ,gate_delay=3, gate_threshold=0.6, filename_prefix=None, status_updates=True, show_time_to_gen=True, end_mode='max', absolute_maximum_tries=2048, absolutely_required_score=-1e3):
         """
         PARAMS:
         ...
@@ -661,7 +661,7 @@ class T2S:
             
             max_length = output_lengths.max()
             mel_batch_outputs_postnet = torch.nn.utils.rnn.pad_sequence(mel_batch_outputs_postnet, batch_first=True, padding_value=-11.52).transpose(1,2)[:,:,:max_length]
-            #alignments_batch = torch.nn.utils.rnn.pad_sequence(alignments_batch, batch_first=True, padding_value=0)[:,:max_length,:]
+            alignments_batch = torch.nn.utils.rnn.pad_sequence(alignments_batch, batch_first=True, padding_value=0)[:,:max_length,:]
             '''
             mel_batch_outputs_postnet  = mel_batch_outputs_postnet.float()  # Ensure correct dtype
             mel_80 = mel_batch_outputs_postnet
@@ -670,6 +670,7 @@ class T2S:
             mel_160 = mel_160_transposed.transpose(1, 2)  # [batch, 160, time]
             mel_batch_outputs_postnet = mel_160
             '''
+            
             if status_updates:
                 vo_start = time.time()
                 print("Running Vocoder... ")
@@ -720,6 +721,7 @@ class T2S:
                 fs = h.sampling_rate  # Sampling rate from config
 
                 # Denoise audio
+                print("demoising audio...")
                 audio = audio * MAX_WAV_VALUE
                 audio_denoised = denoiser(audio.view(1, -1), strength=denoise1)[:, 0]  # Reduced strength
                 audio_np = audio_denoised.cpu().numpy().astype(np.float64)
@@ -728,22 +730,26 @@ class T2S:
 
                 # Normalize
                 max_amplitude = np.max(np.abs(audio_np))
+                normalize = (MAX_WAV_VALUE / max_amplitude) ** 0.9
+                if max_amplitude > 0:
+                    print(f"Normalizing audio with max amplitude {max_amplitude:.2f}")
+                    audio_np *= normalize
+                    
                 
-                normalize = (MAX_WAV_VALUE / max_amplitude) ** 0.8
-                audio_np = audio_np * normalize
-
                 # Optional high-pass filter (use lower cutoff for speech)
                 # Comment out to test without filtering
+                
                 b = scipy.signal.firwin(numtaps=101, cutoff=60, fs=fs, pass_zero=False)
                 audio_filtered = scipy.signal.lfilter(b, [1.0], audio_np)
-                mix_factor = 0.2  # Blend filtered and unfiltered audio
+                mix_factor = .4  # Blend filtered and unfiltered audio
                 audio_mixed = (1 - mix_factor) * audio_np + mix_factor * audio_filtered
-                # audio_mixed = audio_np  # Uncomment to skip filter entirely
+                if skipfilter:
+                    audio_mixed = audio_np  # Uncomment to skip filter entirely
 
                 # Moderate amplification
                 audio_mixed *= srpower  # Adjust as needed (1.0 for no extra gain)
                 audio_mixed /= normalize  # Denormalize
-
+               
                 # Clip to prevent overflow
                 audio_mixed = np.clip(audio_mixed, -MAX_WAV_VALUE, MAX_WAV_VALUE)
 
@@ -759,16 +765,7 @@ class T2S:
                 audio = audio.flatten()
                 
                 write(save_path, fs, audio)
-                                #DODO1
-                
-                # remove if already exists
-                if os.path.exists(save_path):
-                    print(f"File already found at [{save_path}], overwriting.")
-                    os.remove(save_path)
-                
-                audio = audio.flatten()
-                # Write the audio file
-                write(save_path, self.ttm_hparams.sampling_rate, audio)
+                        
                 
                 counter+=1
                 audio_len+=audio_end
